@@ -66,6 +66,14 @@
     background:transparent;cursor:pointer;}
   .setting input[type="range"]{grid-column:1 / -1;width:100%;accent-color:var(--accent);}
   .setting output{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  #videoSources{padding:12px 16px;border-top:1px solid var(--line);background:#0f141a;}
+  #videoSources h2{font-size:12px;margin:0 0 8px;}
+  .source-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;}
+  .source{display:flex;flex-direction:column;gap:5px;padding:8px 10px;border:1px solid var(--line);
+    border-radius:6px;background:var(--panel);}
+  .source label{font-size:12px;color:var(--text);}
+  .source input{width:100%;font-size:11px;color:var(--muted);}
+  .source small{font-size:10px;color:var(--muted);}
 </style>
 </head>
 <body>
@@ -101,9 +109,37 @@
       <option value="shoot" selected>シュートフォーム(肘・肩・膝)</option>
       <option value="generic">汎用(全関節)</option>
     </select>
+    <label class="fps-select" for="cameraFps">撮影FPS
+      <select id="cameraFps">
+        <option value="24">24</option>
+        <option value="30" selected>30</option>
+        <option value="60">60</option>
+      </select>
+    </label>
     <button id="recordBtn" class="secondary" disabled>ログ記録 開始</button>
     <button id="settingsBtn" class="secondary" aria-expanded="false">表示設定</button>
   </div>
+
+  <section id="videoSources" aria-label="撮影動画の読み込み">
+    <h2>撮影動画を読み込む</h2>
+    <div class="source-grid">
+      <div class="source">
+        <label for="sideVideo">真横・全身</label>
+        <input id="sideVideo" type="file" accept="video/*">
+        <small>リリース角度と下半身の連動</small>
+      </div>
+      <div class="source">
+        <label for="frontVideo">正面・全身</label>
+        <input id="frontVideo" type="file" accept="video/*">
+        <small>左右差と体幹の安定</small>
+      </div>
+      <div class="source">
+        <label for="handVideo">手元アップ</label>
+        <input id="handVideo" type="file" accept="video/*">
+        <small>手首・指先のフォロースルー</small>
+      </div>
+    </div>
+  </section>
 
   <section id="settingsPanel" aria-label="表示設定">
     <div class="settings-grid">
@@ -149,7 +185,7 @@
 <script type="module">
 import { PoseLandmarker, HandLandmarker, FaceLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.6.1';
 const video = document.getElementById('video');
 const canvas = document.getElementById('overlay');
 const ctx = canvas.getContext('2d');
@@ -157,6 +193,7 @@ const startBtn = document.getElementById('startBtn');
 const toggleCamBtn = document.getElementById('toggleCamBtn');
 const recordBtn = document.getElementById('recordBtn');
 const exerciseSelect = document.getElementById('exerciseSelect');
+const cameraFps = document.getElementById('cameraFps');
 const settingsBtn = document.getElementById('settingsBtn');
 const settingsPanel = document.getElementById('settingsPanel');
 const hint = document.getElementById('hint');
@@ -189,6 +226,7 @@ let recording = false;
 let logRows = [];
 let previousWrist = null;
 let previousWristTime = null;
+let activeVideoUrl = null;
 let fpsCounter = { last: performance.now(), frames: 0, fps: 0 };
 
 // --- One Euro Filter (simple smoothing per-landmark to reduce jitter) ---
@@ -263,7 +301,7 @@ async function startCamera(){
 
   try{
     currentStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode, width:{ideal:960}, height:{ideal:1280} },
+      video: { facingMode, frameRate:{ideal:Number(cameraFps.value), max:Number(cameraFps.value)}, width:{ideal:960}, height:{ideal:1280} },
       audio: false
     });
   }catch(e){
@@ -290,6 +328,44 @@ async function startCamera(){
 function resizeCanvas(){
   canvas.width = video.videoWidth || video.clientWidth;
   canvas.height = video.videoHeight || video.clientHeight;
+}
+
+async function loadVideoFile(file, label){
+  if(!file) return;
+  statusBadge.textContent = 'モデル読み込み中…';
+  try{
+    if(!poseLandmarker) await initModel();
+  }catch(e){
+    statusBadge.textContent = 'モデル読込失敗';
+    alert('動画解析モデルの読み込みに失敗しました。ネットワーク接続を確認してください。\n' + e.message);
+    return;
+  }
+  if(currentStream){
+    currentStream.getTracks().forEach(track => track.stop());
+    currentStream = null;
+  }
+  if(activeVideoUrl) URL.revokeObjectURL(activeVideoUrl);
+  activeVideoUrl = URL.createObjectURL(file);
+  video.srcObject = null;
+  video.src = activeVideoUrl;
+  video.controls = true;
+  video.muted = true;
+  await video.play().catch(()=>{});
+  resizeCanvas();
+  hint.style.display = 'none';
+  metricsEl.style.display = 'flex';
+  analysisEl.style.display = 'block';
+  toggleCamBtn.disabled = true;
+  exerciseSelect.disabled = false;
+  recordBtn.disabled = false;
+  statusBadge.textContent = `${label}を解析中`;
+  statusBadge.classList.add('live');
+  running = true;
+  lastVideoTime = -1;
+  filters = null;
+  previousWrist = null;
+  previousWristTime = null;
+  requestAnimationFrame(loop);
 }
 
 function angleBetween(a, b, c){
@@ -391,7 +467,7 @@ function handSpeed(world, time){
   const bodyScale = distance3d(shoulder, hip);
   let speed = null;
   if(previousWrist && previousWristTime !== null){
-    const dt = Math.max((time - previousWristTime) / 1000, 1 / 120);
+    const dt = Math.max(time - previousWristTime, 1 / 120);
     speed = distance3d(wrist, previousWrist) / bodyScale / dt * 100;
   }
   previousWrist = {...wrist};
@@ -431,7 +507,7 @@ function computeMetrics(world, mode){
     m['右膝角度'] = angleBetween(g(LM.R_HIP), g(LM.R_KNEE), g(LM.R_ANKLE));
     m['左膝角度'] = angleBetween(g(LM.L_HIP), g(LM.L_KNEE), g(LM.L_ANKLE));
     m['体幹傾き'] = trunkLean(world);
-    m['手首相対速度'] = handSpeed(world, performance.now());
+    m['手首相対速度'] = handSpeed(world, video.currentTime);
   } else {
     m['右肘角度'] = angleBetween(g(LM.R_SHOULDER), g(LM.R_ELBOW), g(LM.R_WRIST));
     m['右膝角度'] = angleBetween(g(LM.R_HIP), g(LM.R_KNEE), g(LM.R_ANKLE));
@@ -447,6 +523,44 @@ function trunkLean(world){
   const midHip = {x:(hip.x+hip2.x)/2, y:(hip.y+hip2.y)/2, z:(hip.z+hip2.z)/2};
   const dx = midSh.x-midHip.x, dy = midSh.y-midHip.y;
   return Math.abs(Math.atan2(dx, -dy) * 180/Math.PI);
+}
+
+function releaseAngleFromPose(landmarks){
+  const shoulder = landmarks[12];
+  const elbow = landmarks[14];
+  const wrist = landmarks[16];
+  if(!shoulder || !elbow || !wrist) return null;
+  const dx = wrist.x - elbow.x;
+  const dy = elbow.y - wrist.y;
+  return Math.atan2(dy, dx) * 180 / Math.PI;
+}
+
+function drawReleaseAngle(landmarks){
+  const elbow = landmarks[14];
+  const wrist = landmarks[16];
+  const angle = releaseAngleFromPose(landmarks);
+  if(!elbow || !wrist || angle === null) return;
+  const x1 = wrist.x * canvas.width;
+  const y1 = wrist.y * canvas.height;
+  const length = Math.max(canvas.width, canvas.height) * 0.12;
+  const radians = angle * Math.PI / 180;
+  const x2 = x1 + Math.cos(radians) * length;
+  const y2 = y1 - Math.sin(radians) * length;
+  ctx.save();
+  ctx.strokeStyle = '#ffffff';
+  ctx.fillStyle = '#ffffff';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.font = 'bold 14px sans-serif';
+  ctx.strokeStyle = 'rgba(0,0,0,.85)';
+  ctx.lineWidth = 5;
+  ctx.strokeText(`打ち出し角度目安 ${angle.toFixed(1)}°`, x1 + 8, y1 - 10);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(`打ち出し角度目安 ${angle.toFixed(1)}°`, x1 + 8, y1 - 10);
+  ctx.restore();
 }
 
 function renderMetrics(m){
@@ -489,6 +603,7 @@ async function loop(){
       });
 
       drawHandsAndFace(drawer, handResult, faceResult);
+      drawReleaseAngle(result.landmarks[0]);
 
       let world = result.worldLandmarks && result.worldLandmarks[0];
       if(world){
@@ -499,6 +614,7 @@ async function loop(){
           z: filters[i].z.filter(p.z, t)
         }));
         const metrics = computeMetrics(world, exerciseSelect.value);
+        metrics['打ち出し角度目安'] = releaseAngleFromPose(result.landmarks[0]);
         Object.assign(metrics, computeHandMetrics(handResult), computeFaceMetrics(faceResult));
         renderMetrics(metrics);
         renderAdvice(metrics);
@@ -524,6 +640,21 @@ async function loop(){
 
 startBtn.addEventListener('click', startCamera);
 
+for(const [id, label] of [['sideVideo', '真横動画'], ['frontVideo', '正面動画'], ['handVideo', '手元動画']]){
+  document.getElementById(id).addEventListener('change', event => {
+    loadVideoFile(event.target.files[0], label);
+  });
+}
+
+video.addEventListener('loadedmetadata', resizeCanvas);
+video.addEventListener('seeked', ()=>{
+  lastVideoTime = -1;
+  filters = null;
+  previousWrist = null;
+  previousWristTime = null;
+  if(running) requestAnimationFrame(loop);
+});
+
 settingsBtn.addEventListener('click', ()=>{
   const isOpen = settingsPanel.classList.toggle('open');
   settingsBtn.setAttribute('aria-expanded', String(isOpen));
@@ -539,7 +670,7 @@ toggleCamBtn.addEventListener('click', async ()=>{
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
   if(currentStream){ currentStream.getTracks().forEach(tr=>tr.stop()); }
   currentStream = await navigator.mediaDevices.getUserMedia({
-    video:{ facingMode, width:{ideal:960}, height:{ideal:1280} }, audio:false
+    video:{ facingMode, frameRate:{ideal:Number(cameraFps.value), max:Number(cameraFps.value)}, width:{ideal:960}, height:{ideal:1280} }, audio:false
   });
   video.srcObject = currentStream;
   await video.play();
