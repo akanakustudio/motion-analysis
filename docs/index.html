@@ -49,7 +49,8 @@
     flex-wrap:wrap;pointer-events:none;}
   .analysis{position:absolute;left:10px;bottom:10px;max-width:min(360px,calc(100% - 20px));
     padding:10px 12px;background:rgba(18,22,28,.9);border:1px solid var(--line);
-    border-radius:8px;backdrop-filter:blur(4px);}
+    border-radius:8px;backdrop-filter:blur(4px);pointer-events:auto;}
+  .analysis.collapsed{display:none !important;}
   .analysis h2{font-size:12px;margin:0 0 6px;color:var(--text);}
   .analysis p{font-size:11px;line-height:1.5;margin:3px 0;color:var(--muted);}
   .analysis p.good{color:#9ae6b4;}
@@ -76,6 +77,9 @@
   #videoView.active{display:flex;flex-direction:column;}
   #videoView #videoWrap{height:55%;min-height:240px;flex:none;}
   #videoView h2{font-size:12px;margin:0 0 8px;}
+  .video-tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
+  .video-tools button{padding:8px 12px;font-size:12px;}
+  #videoSources.collapsed{display:none;}
   .source-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;}
   .source{display:flex;flex-direction:column;gap:5px;padding:8px 10px;border:1px solid var(--line);
     border-radius:6px;background:var(--panel);}
@@ -135,8 +139,14 @@
   </div>
 
   <section id="videoView" class="view" aria-label="撮影動画の読み込み">
-    <h2>撮影動画を読み込む</h2>
-    <div class="source-grid">
+    <div class="video-tools">
+      <button id="sourceToggleBtn" class="secondary" aria-expanded="false">動画を選び直す</button>
+      <button id="analysisToggleBtn" class="secondary" aria-expanded="false">分析メッセージを表示</button>
+      <button id="videoResetBtn" class="secondary">動画を先頭へ</button>
+    </div>
+    <div id="videoSources" class="collapsed">
+      <h2>撮影動画を読み込む</h2>
+      <div class="source-grid">
       <div class="source">
         <label for="sideVideo">真横・全身</label>
         <input id="sideVideo" type="file" accept="video/*">
@@ -151,6 +161,7 @@
         <label for="handVideo">手元アップ</label>
         <input id="handVideo" type="file" accept="video/*">
         <small>手首・指先のフォロースルー</small>
+      </div>
       </div>
     </div>
   </section>
@@ -199,7 +210,7 @@
 <script type="module">
 import { PoseLandmarker, HandLandmarker, FaceLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
 
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.8.0';
 const video = document.getElementById('video');
 const canvas = document.getElementById('overlay');
 const ctx = canvas.getContext('2d');
@@ -208,6 +219,10 @@ const toggleCamBtn = document.getElementById('toggleCamBtn');
 const recordBtn = document.getElementById('recordBtn');
 const exerciseSelect = document.getElementById('exerciseSelect');
 const cameraFps = document.getElementById('cameraFps');
+const videoSources = document.getElementById('videoSources');
+const sourceToggleBtn = document.getElementById('sourceToggleBtn');
+const analysisToggleBtn = document.getElementById('analysisToggleBtn');
+const videoResetBtn = document.getElementById('videoResetBtn');
 const hint = document.getElementById('hint');
 const statusBadge = document.getElementById('statusBadge');
 const metricsEl = document.getElementById('metrics');
@@ -344,6 +359,7 @@ async function startCamera(){
   hint.style.display = 'none';
   metricsEl.style.display = 'flex';
   analysisEl.style.display = 'block';
+  analysisEl.classList.add('collapsed');
   toggleCamBtn.disabled = false;
   exerciseSelect.disabled = false;
   recordBtn.disabled = false;
@@ -384,12 +400,15 @@ async function loadVideoFile(file, label){
   hint.style.display = 'none';
   metricsEl.style.display = 'flex';
   analysisEl.style.display = 'block';
+  analysisEl.classList.add('collapsed');
   toggleCamBtn.disabled = true;
   exerciseSelect.disabled = false;
   recordBtn.disabled = false;
   statusBadge.textContent = `${label}を解析中`;
   statusBadge.classList.add('live');
   setView('videoView');
+  videoSources.classList.add('collapsed');
+  sourceToggleBtn.setAttribute('aria-expanded', 'false');
   running = true;
   lastVideoTime = -1;
   filters = null;
@@ -690,6 +709,27 @@ for(const key of ['poseWidth', 'handWidth', 'faceWidth', 'landmarkRadius']){
   const output = document.getElementById(`${key}Value`);
   input.addEventListener('input', ()=>{ output.textContent = `${input.value}px`; });
 }
+
+sourceToggleBtn.addEventListener('click', ()=>{
+  const isOpen = videoSources.classList.toggle('collapsed') === false;
+  sourceToggleBtn.setAttribute('aria-expanded', String(isOpen));
+});
+
+analysisToggleBtn.addEventListener('click', ()=>{
+  const isOpen = analysisEl.classList.toggle('collapsed') === false;
+  analysisToggleBtn.textContent = isOpen ? '分析メッセージを隠す' : '分析メッセージを表示';
+  analysisToggleBtn.setAttribute('aria-expanded', String(isOpen));
+});
+
+videoResetBtn.addEventListener('click', ()=>{
+  video.currentTime = 0;
+  video.pause();
+  lastVideoTime = -1;
+  filters = null;
+  previousWrist = null;
+  previousWristTime = null;
+  if(running) requestAnimationFrame(loop);
+});
 
 toggleCamBtn.addEventListener('click', async ()=>{
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
