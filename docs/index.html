@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Motion 3D Prototype</title>
+<title>Basketball Shot Form Coach</title>
 <style>
   :root{
     --bg:#0b0e12;
@@ -47,6 +47,17 @@
     line-height:1.5;}
   select{background:var(--panel);color:var(--text);border:1px solid var(--line);
     border-radius:6px;padding:8px 10px;font-size:13px;}
+  #settingsPanel{display:none;padding:12px 16px;border-top:1px solid var(--line);
+    background:#0f141a;}
+  #settingsPanel.open{display:block;}
+  .settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;}
+  .setting{display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;
+    padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);}
+  .setting label{font-size:12px;color:var(--text);}
+  .setting input[type="color"]{width:32px;height:24px;padding:0;border:1px solid var(--line);
+    background:transparent;cursor:pointer;}
+  .setting input[type="range"]{grid-column:1 / -1;width:100%;accent-color:var(--accent);}
+  .setting output{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
 </style>
 </head>
 <body>
@@ -78,10 +89,40 @@
       <option value="generic">汎用(全関節)</option>
     </select>
     <button id="recordBtn" class="secondary" disabled>ログ記録 開始</button>
+    <button id="settingsBtn" class="secondary" aria-expanded="false">表示設定</button>
   </div>
 
+  <section id="settingsPanel" aria-label="表示設定">
+    <div class="settings-grid">
+      <div class="setting">
+        <label for="poseColor">姿勢線の色</label>
+        <input id="poseColor" type="color" value="#ffe600">
+        <label for="poseWidth">姿勢線の幅 <output id="poseWidthValue">3px</output></label>
+        <input id="poseWidth" type="range" min="1" max="8" step="1" value="3">
+      </div>
+      <div class="setting">
+        <label for="handColor">手指線の色</label>
+        <input id="handColor" type="color" value="#00e5ff">
+        <label for="handWidth">手指線の幅 <output id="handWidthValue">3px</output></label>
+        <input id="handWidth" type="range" min="1" max="8" step="1" value="3">
+      </div>
+      <div class="setting">
+        <label for="faceColor">顔線の色</label>
+        <input id="faceColor" type="color" value="#ff3dce">
+        <label for="faceWidth">顔線の幅 <output id="faceWidthValue">2px</output></label>
+        <input id="faceWidth" type="range" min="1" max="6" step="1" value="2">
+      </div>
+      <div class="setting">
+        <label for="landmarkColor">ランドマーク点の色</label>
+        <input id="landmarkColor" type="color" value="#ffffff">
+        <label for="landmarkRadius">ランドマーク点の大きさ <output id="landmarkRadiusValue">4px</output></label>
+        <input id="landmarkRadius" type="range" min="1" max="8" step="1" value="4">
+      </div>
+    </div>
+  </section>
+
   <footer>
-    シュートフォーム改善向けの参考値です。単眼カメラのため3D座標は相対値であり、腕の伸展角度や肩・膝の角度はフォーム比較に使う目安としてご利用ください。
+    シュートフォーム改善向けの参考値です。単眼カメラのため3D座標は相対値であり、腕の伸展角度や肩・膝の角度はフォーム比較に使う目安としてご利用ください。「表示設定」から線の色と幅を調整できます。
   </footer>
 </div>
 
@@ -102,9 +143,22 @@ const startBtn = document.getElementById('startBtn');
 const toggleCamBtn = document.getElementById('toggleCamBtn');
 const recordBtn = document.getElementById('recordBtn');
 const exerciseSelect = document.getElementById('exerciseSelect');
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsPanel = document.getElementById('settingsPanel');
 const hint = document.getElementById('hint');
 const statusBadge = document.getElementById('statusBadge');
 const metricsEl = document.getElementById('metrics');
+
+const drawingSettings = {
+  poseColor: document.getElementById('poseColor'),
+  poseWidth: document.getElementById('poseWidth'),
+  handColor: document.getElementById('handColor'),
+  handWidth: document.getElementById('handWidth'),
+  faceColor: document.getElementById('faceColor'),
+  faceWidth: document.getElementById('faceWidth'),
+  landmarkColor: document.getElementById('landmarkColor'),
+  landmarkRadius: document.getElementById('landmarkRadius')
+};
 
 let poseLandmarker = null;
 let handLandmarker = null;
@@ -246,11 +300,20 @@ const EXPRESSION_NAMES = {
 
 function drawHandsAndFace(drawer, handResult, faceResult){
   for(const landmarks of handResult.landmarks || []){
-    drawer.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {color:'#63b3ed', lineWidth:2});
-    drawer.drawLandmarks(landmarks, {radius:3, color:'#90cdf4'});
+    drawer.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {
+      color:drawingSettings.handColor.value,
+      lineWidth:Number(drawingSettings.handWidth.value)
+    });
+    drawer.drawLandmarks(landmarks, {
+      radius:Number(drawingSettings.landmarkRadius.value),
+      color:drawingSettings.landmarkColor.value
+    });
   }
   for(const landmarks of faceResult.faceLandmarks || []){
-    drawer.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_TESSELATION, {color:'#f687b3aa', lineWidth:1});
+    drawer.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_TESSELATION, {
+      color:drawingSettings.faceColor.value,
+      lineWidth:Number(drawingSettings.faceWidth.value)
+    });
   }
 }
 
@@ -342,8 +405,14 @@ async function loop(){
 
     if(result.landmarks && result.landmarks.length > 0){
       const drawer = new DrawingUtils(ctx);
-      drawer.drawLandmarks(result.landmarks[0], {radius:3, color:'#4fd1c5'});
-      drawer.drawConnectors(result.landmarks[0], PoseLandmarker.POSE_CONNECTIONS, {color:'#f6ad5599', lineWidth:2});
+      drawer.drawLandmarks(result.landmarks[0], {
+        radius:Number(drawingSettings.landmarkRadius.value),
+        color:drawingSettings.landmarkColor.value
+      });
+      drawer.drawConnectors(result.landmarks[0], PoseLandmarker.POSE_CONNECTIONS, {
+        color:drawingSettings.poseColor.value,
+        lineWidth:Number(drawingSettings.poseWidth.value)
+      });
 
       drawHandsAndFace(drawer, handResult, faceResult);
 
@@ -379,6 +448,17 @@ async function loop(){
 }
 
 startBtn.addEventListener('click', startCamera);
+
+settingsBtn.addEventListener('click', ()=>{
+  const isOpen = settingsPanel.classList.toggle('open');
+  settingsBtn.setAttribute('aria-expanded', String(isOpen));
+});
+
+for(const key of ['poseWidth', 'handWidth', 'faceWidth', 'landmarkRadius']){
+  const input = drawingSettings[key];
+  const output = document.getElementById(`${key}Value`);
+  input.addEventListener('input', ()=>{ output.textContent = `${input.value}px`; });
+}
 
 toggleCamBtn.addEventListener('click', async ()=>{
   facingMode = facingMode === 'environment' ? 'user' : 'environment';
