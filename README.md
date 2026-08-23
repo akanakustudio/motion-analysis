@@ -5,6 +5,8 @@
 ## 特徴
 
 - シュートフォームに特化した肘・肩・膝の角度可視化
+- 右手・左手それぞれの手首から指先までの伸展状態を可視化
+- 首から頭頂部にかけて顔ランドマークを追跡し、表情の変化を表示
 - フリースローやジャンプシュートのフォーム比較に適したリアルタイム計測
 - One Euro Filter によるランドマークの平滑化（ジッター low減）
 - 体幹の傾きや腕の伸展状態を可視化して、フォームの再現性を確認
@@ -35,11 +37,13 @@ npx serve docs
 
 - [MediaPipe Tasks Vision](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)（`@mediapipe/tasks-vision`、CDN経由でロード）
 - Pose Landmarker Full モデル（`pose_landmarker_full`）
+- Hand Landmarker / Face Landmarker（手指・顔表情のランドマークとブレンドシェイプ）
 - Vanilla JavaScript（ビルド不要、単一HTMLファイル）
 
 ## 更新履歴
 
 - 2026-08-23: シュートフォーム改善に特化した計測モードへ変更し、READMEとUI文言を更新。
+- 2026-08-23: 右手・左手の指先伸展と顔表情のランドマーク計測を追加。
 - 2026-08-23: GitHub Pages での公開URLを追加し、READMEにアクセス先を明記。
 - 2026-08-23: 3D姿勢推定プロトタイプの初期版を作成し、ブラウザ内でのリアルタイム計測機能を実装。
 

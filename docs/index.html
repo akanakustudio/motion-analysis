@@ -93,7 +93,7 @@
 }
 </script>
 <script type="module">
-import { PoseLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
+import { PoseLandmarker, HandLandmarker, FaceLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('overlay');
@@ -107,6 +107,8 @@ const statusBadge = document.getElementById('statusBadge');
 const metricsEl = document.getElementById('metrics');
 
 let poseLandmarker = null;
+let handLandmarker = null;
+let faceLandmarker = null;
 let currentStream = null;
 let facingMode = 'environment';
 let running = false;
@@ -155,6 +157,23 @@ async function initModel(){
     },
     runningMode: "VIDEO",
     numPoses: 1
+  });
+  handLandmarker = await HandLandmarker.createFromOptions(fileset, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    numHands: 2
+  });
+  faceLandmarker = await FaceLandmarker.createFromOptions(fileset, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    numFaces: 1,
+    outputFaceBlendshapes: true
   });
 }
 
@@ -215,6 +234,55 @@ const LM = {
   L_HIP:23, R_HIP:24, L_KNEE:25, R_KNEE:26, L_ANKLE:27, R_ANKLE:28
 };
 
+const FINGER_TIPS = [4, 8, 12, 16, 20];
+const EXPRESSION_NAMES = {
+  mouthSmileLeft: '笑顔',
+  mouthSmileRight: '笑顔',
+  mouthOpen: '口の開き',
+  browInnerUp: '眉の上がり',
+  eyeWideLeft: '左目の開き',
+  eyeWideRight: '右目の開き'
+};
+
+function drawHandsAndFace(drawer, handResult, faceResult){
+  for(const landmarks of handResult.landmarks || []){
+    drawer.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {color:'#63b3ed', lineWidth:2});
+    drawer.drawLandmarks(landmarks, {radius:3, color:'#90cdf4'});
+  }
+  for(const landmarks of faceResult.faceLandmarks || []){
+    drawer.drawConnectors(landmarks, FaceLandmarker.FACE_LANDMARKS_TESSELATION, {color:'#f687b3aa', lineWidth:1});
+  }
+}
+
+function distance3d(a, b){
+  return Math.hypot(a.x-b.x, a.y-b.y, a.z-b.z);
+}
+
+function computeHandMetrics(handResult){
+  const metrics = {};
+  (handResult.landmarks || []).forEach((landmarks, index)=>{
+    const handedness = handResult.handedness?.[index]?.[0]?.categoryName;
+    const label = handedness === 'Left' ? '左手' : handedness === 'Right' ? '右手' : `手${index + 1}`;
+    const wrist = landmarks[0];
+    const palmSize = distance3d(landmarks[0], landmarks[9]);
+    if(!wrist || !palmSize) return;
+    const fingertipReach = FINGER_TIPS.reduce((sum, tipIndex)=>
+      sum + distance3d(wrist, landmarks[tipIndex]) / palmSize, 0) / FINGER_TIPS.length;
+    metrics[`${label} 指先伸展`] = fingertipReach * 100;
+  });
+  return metrics;
+}
+
+function computeFaceMetrics(faceResult){
+  const categories = faceResult.faceBlendshapes?.[0]?.categories || [];
+  if(!categories.length) return {};
+  const strongest = categories
+    .filter(category => EXPRESSION_NAMES[category.categoryName])
+    .sort((a, b) => b.score - a.score)[0];
+  if(!strongest) return {};
+  return {[`表情 ${EXPRESSION_NAMES[strongest.categoryName]}`]: strongest.score * 100};
+}
+
 function computeMetrics(world, mode){
   const m = {};
   if(!world) return m;
@@ -253,7 +321,9 @@ function renderMetrics(m){
   for(const [k,v] of Object.entries(m)){
     const chip = document.createElement('div');
     chip.className = 'chip';
-    chip.innerHTML = `${k} <b>${v===null||v===undefined?'--':v.toFixed(1)+'°'}</b>`;
+    const unit = k.includes('手') || k.includes('表情') ? '%' : '°';
+    const value = v===null || v===undefined ? '--' : v.toFixed(1) + unit;
+    chip.innerHTML = `${k} <b>${value}</b>`;
     metricsEl.appendChild(chip);
   }
 }
@@ -264,6 +334,8 @@ async function loop(){
     lastVideoTime = video.currentTime;
     const t = performance.now();
     const result = poseLandmarker.detectForVideo(video, t);
+    const handResult = handLandmarker.detectForVideo(video, t);
+    const faceResult = faceLandmarker.detectForVideo(video, t);
 
     ctx.save();
     ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -272,6 +344,8 @@ async function loop(){
       const drawer = new DrawingUtils(ctx);
       drawer.drawLandmarks(result.landmarks[0], {radius:3, color:'#4fd1c5'});
       drawer.drawConnectors(result.landmarks[0], PoseLandmarker.POSE_CONNECTIONS, {color:'#f6ad5599', lineWidth:2});
+
+      drawHandsAndFace(drawer, handResult, faceResult);
 
       let world = result.worldLandmarks && result.worldLandmarks[0];
       if(world){
@@ -282,6 +356,7 @@ async function loop(){
           z: filters[i].z.filter(p.z, t)
         }));
         const metrics = computeMetrics(world, exerciseSelect.value);
+        Object.assign(metrics, computeHandMetrics(handResult), computeFaceMetrics(faceResult));
         renderMetrics(metrics);
         if(recording){
           const row = {t: Date.now(), ...metrics};
