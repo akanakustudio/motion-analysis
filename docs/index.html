@@ -53,8 +53,8 @@
 <div class="app">
   <header>
     <div>
-      <h1>Markerless Motion — 3D Pose Prototype</h1>
-      <div class="sub">MediaPipe BlazePose (world landmarks) / ブラウザ内推論</div>
+      <h1>Basketball Shot Form Coach</h1>
+      <div class="sub">MediaPipe BlazePose / シュートフォーム分析</div>
     </div>
     <div id="statusBadge" class="status">未起動</div>
   </header>
@@ -65,7 +65,7 @@
       <canvas id="overlay"></canvas>
       <div class="metrics" id="metrics" style="display:none;"></div>
       <div class="hint" id="hint">
-        <p>スマホを縦か横に固定し、全身が映る距離(2〜3m)からカメラを起動してください。単眼カメラのため、正面〜斜め45度からの撮影が最も安定します。</p>
+        <p>フリースローまたはジャンプシュートを、正面〜斜め45度で撮影してください。肘・肩・膝の角度と体幹の傾きが、フォーム改善の参考になります。</p>
         <button id="startBtn">カメラを起動</button>
       </div>
     </div>
@@ -74,15 +74,14 @@
   <div class="controls">
     <button id="toggleCamBtn" class="secondary" disabled>前後カメラ切替</button>
     <select id="exerciseSelect" disabled>
+      <option value="shoot" selected>シュートフォーム(肘・肩・膝)</option>
       <option value="generic">汎用(全関節)</option>
-      <option value="squat">スクワット(膝・股関節角度)</option>
-      <option value="pitch">投球フォーム(肘・肩角度)</option>
     </select>
     <button id="recordBtn" class="secondary" disabled>ログ記録 開始</button>
   </div>
 
   <footer>
-    プロトタイプ版。単眼カメラのため3D座標は相対値(奥行きスケールは未較正)であり、絶対距離・角度は参考値です。高速動作では検出が乱れる場合があります。
+    シュートフォーム改善向けの参考値です。単眼カメラのため3D座標は相対値であり、腕の伸展角度や肩・膝の角度はフォーム比較に使う目安としてご利用ください。
   </footer>
 </div>
 
@@ -220,14 +219,14 @@ function computeMetrics(world, mode){
   const m = {};
   if(!world) return m;
   const g = i => world[i];
-  if(mode==='squat'){
-    m['右膝角度'] = angleBetween(g(LM.R_HIP), g(LM.R_KNEE), g(LM.R_ANKLE));
-    m['左膝角度'] = angleBetween(g(LM.L_HIP), g(LM.L_KNEE), g(LM.L_ANKLE));
-    m['右股関節角度'] = angleBetween(g(LM.R_SHOULDER), g(LM.R_HIP), g(LM.R_KNEE));
-  } else if(mode==='pitch'){
+  if(mode === 'shoot'){
     m['右肘角度'] = angleBetween(g(LM.R_SHOULDER), g(LM.R_ELBOW), g(LM.R_WRIST));
     m['左肘角度'] = angleBetween(g(LM.L_SHOULDER), g(LM.L_ELBOW), g(LM.L_WRIST));
     m['右肩角度'] = angleBetween(g(LM.R_HIP), g(LM.R_SHOULDER), g(LM.R_ELBOW));
+    m['左肩角度'] = angleBetween(g(LM.L_HIP), g(LM.L_SHOULDER), g(LM.L_ELBOW));
+    m['右膝角度'] = angleBetween(g(LM.R_HIP), g(LM.R_KNEE), g(LM.R_ANKLE));
+    m['左膝角度'] = angleBetween(g(LM.L_HIP), g(LM.L_KNEE), g(LM.L_ANKLE));
+    m['体幹傾き'] = trunkLean(world);
   } else {
     m['右肘角度'] = angleBetween(g(LM.R_SHOULDER), g(LM.R_ELBOW), g(LM.R_WRIST));
     m['右膝角度'] = angleBetween(g(LM.R_HIP), g(LM.R_KNEE), g(LM.R_ANKLE));
