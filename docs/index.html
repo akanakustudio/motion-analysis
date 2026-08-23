@@ -39,6 +39,13 @@
     background:var(--panel);flex-wrap:wrap;align-items:center;}
   .metrics{position:absolute;top:10px;left:10px;right:10px;display:flex;gap:8px;
     flex-wrap:wrap;pointer-events:none;}
+  .analysis{position:absolute;left:10px;bottom:10px;max-width:min(360px,calc(100% - 20px));
+    padding:10px 12px;background:rgba(18,22,28,.9);border:1px solid var(--line);
+    border-radius:8px;backdrop-filter:blur(4px);}
+  .analysis h2{font-size:12px;margin:0 0 6px;color:var(--text);}
+  .analysis p{font-size:11px;line-height:1.5;margin:3px 0;color:var(--muted);}
+  .analysis p.good{color:#9ae6b4;}
+  .analysis p.warn{color:#fbd38d;}
   .chip{background:rgba(18,22,28,.85);border:1px solid var(--line);border-radius:8px;
     padding:6px 10px;font-size:11px;color:var(--muted);backdrop-filter:blur(4px);}
   .chip b{color:var(--text);font-size:13px;font-variant-numeric:tabular-nums;}
@@ -75,6 +82,10 @@
       <video id="video" playsinline muted></video>
       <canvas id="overlay"></canvas>
       <div class="metrics" id="metrics" style="display:none;"></div>
+      <div class="analysis" id="analysis" style="display:none;">
+        <h2>シュートフォーム自己分析</h2>
+        <p>姿勢を検出すると、理想フォームの目安と比較します。</p>
+      </div>
       <div class="hint" id="hint">
         <p>フリースローまたはジャンプシュートを、正面〜斜め45度で撮影してください。肘・肩・膝の角度と体幹の傾きが、フォーム改善の参考になります。</p>
         <button id="startBtn">カメラを起動</button>
@@ -148,6 +159,7 @@ const settingsPanel = document.getElementById('settingsPanel');
 const hint = document.getElementById('hint');
 const statusBadge = document.getElementById('statusBadge');
 const metricsEl = document.getElementById('metrics');
+const analysisEl = document.getElementById('analysis');
 
 const drawingSettings = {
   poseColor: document.getElementById('poseColor'),
@@ -169,6 +181,8 @@ let running = false;
 let lastVideoTime = -1;
 let recording = false;
 let logRows = [];
+let previousWrist = null;
+let previousWristTime = null;
 let fpsCounter = { last: performance.now(), frames: 0, fps: 0 };
 
 // --- One Euro Filter (simple smoothing per-landmark to reduce jitter) ---
@@ -257,6 +271,7 @@ async function startCamera(){
   resizeCanvas();
   hint.style.display = 'none';
   metricsEl.style.display = 'flex';
+  analysisEl.style.display = 'block';
   toggleCamBtn.disabled = false;
   exerciseSelect.disabled = false;
   recordBtn.disabled = false;
@@ -346,6 +361,58 @@ function computeFaceMetrics(faceResult){
   return {[`表情 ${EXPRESSION_NAMES[strongest.categoryName]}`]: strongest.score * 100};
 }
 
+const SHOOTING_GUIDE = {
+  elbow: {min:150, max:180, label:'肘の伸展'},
+  knee: {min:120, max:175, label:'膝の角度'},
+  trunk: {min:0, max:12, label:'体幹の傾き'},
+  hand: {min:90, max:180, label:'指先の伸展'}
+};
+
+function compareToGuide(value, guide){
+  if(value === null || value === undefined) return 'missing';
+  return value >= guide.min && value <= guide.max ? 'good' : 'warn';
+}
+
+function handSpeed(world, time){
+  const wrist = world[LM.R_WRIST];
+  const shoulder = world[LM.R_SHOULDER];
+  const hip = world[LM.R_HIP];
+  if(!wrist || !shoulder || !hip){
+    previousWrist = null;
+    previousWristTime = null;
+    return null;
+  }
+  const bodyScale = distance3d(shoulder, hip);
+  let speed = null;
+  if(previousWrist && previousWristTime !== null){
+    const dt = Math.max((time - previousWristTime) / 1000, 1 / 120);
+    speed = distance3d(wrist, previousWrist) / bodyScale / dt * 100;
+  }
+  previousWrist = {...wrist};
+  previousWristTime = time;
+  return speed;
+}
+
+function renderAdvice(metrics){
+  const advice = [];
+  const add = (value, guide, goodText, warnText) => {
+    if(value === null || value === undefined) return;
+    advice.push({state:compareToGuide(value, guide), text:compareToGuide(value, guide) === 'good' ? goodText : warnText});
+  };
+  add(metrics['右肘角度'], SHOOTING_GUIDE.elbow, '右肘の伸びはリリース姿勢の目安内です。', '右肘をリング方向へ伸ばし、リリース時に腕が縮まらないか確認してください。');
+  add(metrics['左肘角度'], SHOOTING_GUIDE.elbow, '左肘の伸びは安定しています。', '左肘が開きすぎたり縮みすぎたりしていないか確認してください。');
+  add(metrics['右膝角度'], SHOOTING_GUIDE.knee, '右膝の曲げは下半身の連動に使える範囲です。', '膝の曲げ伸ばしを使い、腕だけで打ち出さないように確認してください。');
+  add(metrics['体幹傾き'], SHOOTING_GUIDE.trunk, '体幹はまっすぐ保てています。', '体幹の反り・前傾を抑え、足元から上へ力が伝わる姿勢を確認してください。');
+  add(metrics['右手 指先伸展'], SHOOTING_GUIDE.hand, '右手の指先まで伸びています。', '右手首から指先までのフォロースルーをリング方向へ残してください。');
+  const elbowGap = Math.abs((metrics['右肘角度'] ?? 0) - (metrics['左肘角度'] ?? 0));
+  if(metrics['右肘角度'] !== undefined && metrics['左肘角度'] !== undefined){
+    advice.push({state:elbowGap < 20 ? 'good' : 'warn', text:elbowGap < 20 ? '左右の肘の動きの差は小さめです。' : '左右の肘角度に差があります。撮影角度を変えてフォームの左右差を確認してください。'});
+  }
+  analysisEl.innerHTML = '<h2>シュートフォーム自己分析</h2>' +
+    (advice.length ? advice.slice(0, 4).map(item => `<p class="${item.state}">${item.text}</p>`).join('') : '<p>全身が映る位置でフォームを検出してください。</p>') +
+    '<p>※目安値です。距離・利き手・体格に合わせて調整してください。</p>';
+}
+
 function computeMetrics(world, mode){
   const m = {};
   if(!world) return m;
@@ -358,6 +425,7 @@ function computeMetrics(world, mode){
     m['右膝角度'] = angleBetween(g(LM.R_HIP), g(LM.R_KNEE), g(LM.R_ANKLE));
     m['左膝角度'] = angleBetween(g(LM.L_HIP), g(LM.L_KNEE), g(LM.L_ANKLE));
     m['体幹傾き'] = trunkLean(world);
+    m['手首相対速度'] = handSpeed(world, performance.now());
   } else {
     m['右肘角度'] = angleBetween(g(LM.R_SHOULDER), g(LM.R_ELBOW), g(LM.R_WRIST));
     m['右膝角度'] = angleBetween(g(LM.R_HIP), g(LM.R_KNEE), g(LM.R_ANKLE));
@@ -384,7 +452,7 @@ function renderMetrics(m){
   for(const [k,v] of Object.entries(m)){
     const chip = document.createElement('div');
     chip.className = 'chip';
-    const unit = k.includes('手') || k.includes('表情') ? '%' : '°';
+    const unit = k.includes('手') || k.includes('表情') ? '%' : k.includes('速度') ? '%/s' : '°';
     const value = v===null || v===undefined ? '--' : v.toFixed(1) + unit;
     chip.innerHTML = `${k} <b>${value}</b>`;
     metricsEl.appendChild(chip);
@@ -427,6 +495,7 @@ async function loop(){
         const metrics = computeMetrics(world, exerciseSelect.value);
         Object.assign(metrics, computeHandMetrics(handResult), computeFaceMetrics(faceResult));
         renderMetrics(metrics);
+        renderAdvice(metrics);
         if(recording){
           const row = {t: Date.now(), ...metrics};
           logRows.push(row);
