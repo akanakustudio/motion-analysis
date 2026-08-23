@@ -22,6 +22,7 @@
     display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
   header h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.02em;}
   header .sub{font-size:11px;color:var(--muted);}
+  .version{font-size:10px;color:var(--muted);margin-top:3px;}
   .status{font-size:11px;padding:3px 8px;border-radius:20px;border:1px solid var(--line);color:var(--muted);}
   .status.live{color:var(--accent);border-color:var(--accent);}
   main{flex:1;position:relative;overflow:hidden;background:#000;}
@@ -73,6 +74,7 @@
     <div>
       <h1>Basketball Shot Form Coach</h1>
       <div class="sub">MediaPipe BlazePose / シュートフォーム分析</div>
+      <div class="version" id="versionBadge"></div>
     </div>
     <div id="statusBadge" class="status">未起動</div>
   </header>
@@ -147,6 +149,7 @@
 <script type="module">
 import { PoseLandmarker, HandLandmarker, FaceLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
 
+const APP_VERSION = '0.5.0';
 const video = document.getElementById('video');
 const canvas = document.getElementById('overlay');
 const ctx = canvas.getContext('2d');
@@ -160,6 +163,9 @@ const hint = document.getElementById('hint');
 const statusBadge = document.getElementById('statusBadge');
 const metricsEl = document.getElementById('metrics');
 const analysisEl = document.getElementById('analysis');
+const versionBadge = document.getElementById('versionBadge');
+versionBadge.textContent = `バージョン ${APP_VERSION}`;
+document.title = `Basketball Shot Form Coach v${APP_VERSION}`;
 
 const drawingSettings = {
   poseColor: document.getElementById('poseColor'),

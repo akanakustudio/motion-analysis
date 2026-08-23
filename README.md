@@ -2,6 +2,8 @@
 
 バスケットボールのシュートフォーム改善に特化した、単眼カメラによる姿勢可視化プロトタイプです。[MediaPipe BlazePose](https://github.com/google-ai-edge/mediapipe)（Pose Landmarker, world landmarks）を利用し、サーバーへの映像送信なしでブラウザ内で推論します。
 
+バージョン: `0.5.0`
+
 ## 特徴
 
 - シュートフォームに特化した肘・肩・膝の角度可視化
